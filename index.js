@@ -19,7 +19,11 @@ wss.on("connection", (ws) => {
       case "createGame":
         // Create a new game room
         const gameId = uuidv4();
-        games[gameId] = { players: [ws], gameStarted: false };
+        games[gameId] = {
+          players: [ws],
+          gameStarted: false,
+          gameType: data.gameType || "draughts",
+        };
         ws.send(JSON.stringify({ type: "gameCreated", gameId }));
         console.log(`Game created with ID: ${gameId}`);
         break;
@@ -28,8 +32,21 @@ wss.on("connection", (ws) => {
         // Join an existing game room
         const room = games[data.gameId];
         if (room) {
+          // Check if the player is already in the room
+          if (room.players.includes(ws)) {
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "You are already in the game!",
+              })
+            );
+            console.log("Player is already in the game");
+            break;
+          }
+
           if (room.players.length < 2) {
             room.players.push(ws);
+            console.log(`Player joined game ${data.gameId}`);
             room.players.forEach((player, index) => {
               player.send(
                 JSON.stringify({
@@ -53,6 +70,22 @@ wss.on("connection", (ws) => {
             JSON.stringify({ type: "error", message: "Game not found!" })
           );
         }
+        break;
+
+      case "listGames":
+        // Send a list of available draught games
+        const availableGames = Object.keys(games)
+          .filter(
+            (gameId) =>
+              games[gameId].players.length === 1 &&
+              !games[gameId].gameStarted &&
+              games[gameId].gameType === "draughts" // Filter for draughts games
+          )
+          .map((gameId) => ({ gameId, gameType: games[gameId].gameType }));
+
+        ws.send(
+          JSON.stringify({ type: "availableGames", games: availableGames })
+        );
         break;
 
       case "move":
@@ -116,6 +149,10 @@ wss.on("connection", (ws) => {
         );
         delete games[gameId];
         console.log(`Game ${gameId} deleted after player disconnection`);
+      } else {
+        disconnectedGame.players[0].send(
+          JSON.stringify({ type: "opponentLeft" })
+        );
       }
     }
     console.log("Client disconnected!");
