@@ -23,6 +23,7 @@ wss.on("connection", (ws) => {
           players: [ws],
           gameStarted: false,
           gameType: data.gameType || "draughts",
+          gameState: null, // Initialize the game state as null
         };
         ws.send(JSON.stringify({ type: "gameCreated", gameId }));
         console.log(`Game created with ID: ${gameId}`);
@@ -32,7 +33,6 @@ wss.on("connection", (ws) => {
         // Join an existing game room
         const room = games[data.gameId];
         if (room) {
-          // Check if the player is already in the room
           if (room.players.includes(ws)) {
             ws.send(
               JSON.stringify({
@@ -56,11 +56,21 @@ wss.on("connection", (ws) => {
               );
             });
             room.gameStarted = true;
+
+            // Send initial turn and empty gameState (if needed)
             room.players[0].send(
-              JSON.stringify({ type: "start", yourTurn: true })
+              JSON.stringify({
+                type: "start",
+                yourTurn: true,
+                gameState: room.gameState,
+              })
             );
             room.players[1].send(
-              JSON.stringify({ type: "start", yourTurn: false })
+              JSON.stringify({
+                type: "start",
+                yourTurn: false,
+                gameState: room.gameState,
+              })
             );
           } else {
             ws.send(JSON.stringify({ type: "error", message: "Game full!" }));
@@ -73,13 +83,12 @@ wss.on("connection", (ws) => {
         break;
 
       case "listGames":
-        // Send a list of available draught games
         const availableGames = Object.keys(games)
           .filter(
             (gameId) =>
               games[gameId].players.length === 1 &&
               !games[gameId].gameStarted &&
-              games[gameId].gameType === "draughts" // Filter for draughts games
+              games[gameId].gameType === "draughts"
           )
           .map((gameId) => ({ gameId, gameType: games[gameId].gameType }));
 
@@ -89,16 +98,29 @@ wss.on("connection", (ws) => {
         break;
 
       case "move":
-        // Forward the move to the opponent
         const gameRoom = Object.values(games).find((room) =>
           room.players.includes(ws)
         );
         if (gameRoom) {
           const opponent = gameRoom.players.find((player) => player !== ws);
+
           if (opponent) {
+            // Update the gameState with the new move
+            gameRoom.gameState = data.gameState; // gameState contains the updated board (2D array)
+
+            // Send the move and updated gameState to the opponent
             opponent.send(
               JSON.stringify({
                 type: "opponentMove",
+                move: data.move,
+                gameState: gameRoom.gameState, // Send updated game state
+              })
+            );
+
+            // Send a confirmation to the current player that the move was processed
+            ws.send(
+              JSON.stringify({
+                type: "moveConfirmed",
                 move: data.move,
               })
             );
@@ -107,7 +129,6 @@ wss.on("connection", (ws) => {
         break;
 
       case "exitGame":
-        // Exit from the game
         const exitGameRoom = Object.values(games).find((room) =>
           room.players.includes(ws)
         );
@@ -118,7 +139,6 @@ wss.on("connection", (ws) => {
           ws.send(JSON.stringify({ type: "gameExited" }));
           console.log(`Player exited game`);
           if (exitGameRoom.players.length === 0) {
-            // Delete the game if both players leave
             const gameIdToDelete = Object.keys(games).find(
               (id) => games[id] === exitGameRoom
             );
@@ -135,7 +155,6 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    // Handle player disconnection
     const disconnectedGame = Object.values(games).find((room) =>
       room.players.includes(ws)
     );
